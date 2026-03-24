@@ -3,4 +3,5 @@ opencv-python-headless
 pytesseract
 pillow
 numpy
-pandas
+fuzzywuzzy
+python-Levenshtein
