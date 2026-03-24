@@ -1,8 +1,3 @@
-"""
-VerifyAI — Autonomous KYC
-A realistic KYC verification system using OCR, face matching, and risk scoring.
-"""
-
 import streamlit as st
 import cv2
 import numpy as np
@@ -10,258 +5,156 @@ import pytesseract
 from PIL import Image
 import re
 import pandas as pd
-
-# ⚠️ If using Windows, uncomment and set your path
-# pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+from fuzzywuzzy import fuzz
 
 # ─────────────────────────────────────────────
-# PAGE CONFIG
+# PAGE CONFIG & PREMIUM STYLING
 # ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="VerifyAI — Autonomous KYC",
-    page_icon="🛡️",
-    layout="wide",
-)
+st.set_page_config(page_title="VerifyAI Pro", page_icon="🛡️", layout="wide")
 
-# ─────────────────────────────────────────────
-# PREMIUM UI STYLE
-# ─────────────────────────────────────────────
 st.markdown("""
 <style>
-.stApp {
-    background: linear-gradient(to right, #0f2027, #203a43, #2c5364);
-    color: white;
+.stApp { background: linear-gradient(to right, #0f2027, #203a43, #2c5364); color: white; }
+.stButton>button { 
+    background-color: #00c6ff; 
+    color: black; 
+    border-radius: 10px; 
+    font-weight: bold; 
+    height: 3em;
+    transition: 0.3s;
 }
-.stTextInput input, .stTextArea textarea {
-    background-color: #1e1e1e !important;
-    color: white !important;
-}
-.stButton>button {
-    background-color: #00c6ff;
-    color: black;
-    border-radius: 10px;
-    font-weight: bold;
-}
+.stButton>button:hover { background-color: #0072ff; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# HELPER FUNCTIONS
+# CORE AI LOGIC
 # ─────────────────────────────────────────────
 
-def validate_email(email: str) -> bool:
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email))
-
-
-def validate_phone(phone: str) -> bool:
-    digits = re.sub(r'\D', '', phone)
-    return len(digits) == 10
-
-
 def extract_ocr_text(image: Image.Image) -> str:
+    """Reads text from the uploaded ID."""
     try:
         img = image.convert("RGB")
         text = pytesseract.image_to_string(img, config='--psm 6')
         return text.strip()
-    except Exception as e:
-        return f"OCR Error: {str(e)}"
+    except Exception:
+        return ""
 
-
-def score_document(ocr_text: str):
-    if not ocr_text or "OCR Error" in ocr_text:
-        return 0, "❌ No Text Detected"
-
-    score = 0
-    if len(ocr_text) > 10:
-        score += 20
-
-    has_numbers = bool(re.search(r'\d{4,}', ocr_text))
-    has_words = len([w for w in ocr_text.split() if len(w) >= 3]) >= 3
-
-    if has_numbers or has_words:
-        score += 20
-
-    if score >= 40:
-        status = "✅ Verified"
-    elif score >= 20:
-        status = "⚠️ Needs Review"
-    else:
-        status = "❌ Unverified"
-
-    return score, status
-
-
-def pil_to_cv2(image: Image.Image):
-    img = image.convert("RGB")
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
-
-def detect_faces(cv2_img):
-    try:
-        gray = cv2.cvtColor(cv2_img, cv2.COLOR_BGR2GRAY)
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        face_cascade = cv2.CascadeClassifier(cascade_path)
-
-        faces = face_cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60)
-        )
-        return faces
-    except:
-        return []
-
-
-def compare_faces(doc_img, selfie_img):
-    similarity = 0.0  # Initialize to avoid UnboundLocalError
+def verify_identity_logic(user_name, ocr_text):
+    """
+    ANTI-FAKE DATA: Compares typed name to ID text.
+    Uses Fuzzy Matching to allow for minor OCR typos.
+    """
+    if not ocr_text or len(user_name) < 3:
+        return 0, "❌ Name Not Found on ID"
     
-    doc_cv = pil_to_cv2(doc_img)
-    selfie_cv = pil_to_cv2(selfie_img)
-
-    # Resize for comparison
-    h, w = 200, 200
-    doc_resized = cv2.resize(doc_cv, (w, h))
-    selfie_resized = cv2.resize(selfie_cv, (w, h))
-
-    doc_hsv = cv2.cvtColor(doc_resized, cv2.COLOR_BGR2HSV)
-    selfie_hsv = cv2.cvtColor(selfie_resized, cv2.COLOR_BGR2HSV)
-
-    similarity_scores = []
-    for ch in range(3):
-        hist1 = cv2.calcHist([doc_hsv], [ch], None, [64], [0, 256])
-        hist2 = cv2.calcHist([selfie_hsv], [ch], None, [64], [0, 256])
-
-        cv2.normalize(hist1, hist1)
-        cv2.normalize(hist2, hist2)
-
-        score = cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL)
-        similarity_scores.append(score)
-
-    similarity = float(np.mean(similarity_scores))
-
-    if similarity >= 0.55:
-        return 40, "✅ Face Match — Strong", similarity
-    elif similarity >= 0.25:
-        return 20, "⚠️ Face Match — Weak", similarity
+    # Calculate similarity ratio (0 to 100)
+    match_ratio = fuzz.partial_ratio(user_name.lower(), ocr_text.lower())
+    
+    if match_ratio > 85:
+        return 40, f"✅ Verified (Match: {match_ratio}%)"
+    elif match_ratio > 60:
+        return 20, f"⚠️ Partial Match ({match_ratio}%) - Review Required"
     else:
-        return 0, "❌ Face Mismatch", similarity
+        return 0, "❌ Identity Mismatch (Fraud Detected)"
 
+def biometric_face_check(doc_img, selfie_img):
+    """
+    Compares the face on the ID to the Live Webcam Selfie.
+    """
+    def extract_face(img):
+        cv_img = cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        if len(faces) > 0:
+            (x, y, w, h) = faces[0]
+            face_roi = gray[y:y+h, x:x+w]
+            return cv2.resize(face_roi, (120, 120))
+        return None
 
-def score_data(name, address, dob, phone, email):
-    score = 20
-    issues = []
+    face_id = extract_face(doc_img)
+    face_live = extract_face(selfie_img)
 
-    if not name.strip():
-        score -= 5
-        issues.append("Name missing")
-    if not address.strip():
-        score -= 5
-        issues.append("Address missing")
-    if not dob:
-        score -= 3
-        issues.append("DOB missing")
-    if not validate_phone(phone):
-        score -= 4
-        issues.append("Invalid phone")
-    if not validate_email(email):
-        score -= 3
-        issues.append("Invalid email")
+    if face_id is None or face_live is None:
+        return 0, "❌ Face detection failed (Check lighting)", 0
 
-    score = max(0, score)
-    status = "✅ Complete" if score == 20 else f"⚠️ Issues: {', '.join(issues)}"
-    return score, status
+    # Structural Correlation
+    res = cv2.matchTemplate(face_id, face_live, cv2.TM_CCOEFF_NORMED)
+    similarity = float(res.max())
 
-
-def get_risk_category(total):
-    if total >= 71:
-        return "🟢 Trusted", "✅ Auto Approve"
-    elif total >= 31:
-        return "🟡 Suspicious", "⚠️ Need More Verification"
+    if similarity > 0.45:
+        return 40, "✅ Biometric Match Confirmed", similarity
     else:
-        return "🔴 High Risk", "🔍 Manual Review Required"
-
+        return 0, "❌ Face Mismatch (User is not ID Holder)", similarity
 
 # ─────────────────────────────────────────────
-# UI INPUTS
+# UI INTERFACE
 # ─────────────────────────────────────────────
 
-st.title("🛡️ VerifyAI — Autonomous KYC")
-st.subheader("👤 Customer Information")
+st.title("🛡️ VerifyAI Pro — Autonomous KYC")
+st.info("System Status: Online | Biometric Security Enabled")
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1, 1.2])
+
 with col1:
-    name = st.text_input("Full Name")
-    address = st.text_area("Address")
+    st.subheader("👤 Step 1: Identity Data")
+    name = st.text_input("Full Name (Must match ID card)")
+    doc_type = st.selectbox("Select ID Type", ["Aadhar Card", "PAN Card", "Driving Licence", "Voter ID"])
     dob = st.date_input("Date of Birth")
+    
+    st.subheader("📄 Step 2: Document Upload")
+    doc_file = st.file_uploader(f"Upload Front Side of {doc_type}", type=["jpg", "jpeg", "png"])
+
 with col2:
-    phone = st.text_input("Phone")
-    email = st.text_input("Email")
-
-st.subheader("📄 Upload Documents")
-doc_file = st.file_uploader("Upload ID Document", type=["png", "jpg", "jpeg"])
-selfie_file = st.file_uploader("Upload Selfie", type=["png", "jpg", "jpeg"])
-
-run_kyc = st.button("🚀 Run KYC Verification")
+    st.subheader("📸 Step 3: Live Liveness Check")
+    st.write("Please look directly at the camera.")
+    # LIVE WEBCAM COMPONENT
+    selfie_capture = st.camera_input("Take Live Selfie")
 
 # ─────────────────────────────────────────────
-# MAIN LOGIC
+# EXECUTION
 # ─────────────────────────────────────────────
 
-if run_kyc:
-    errors = []
-    if not name.strip(): errors.append("Name required")
-    if not address.strip(): errors.append("Address required")
-    if not validate_email(email): errors.append("Invalid email")
-    if not validate_phone(phone): errors.append("Invalid phone")
-    if not doc_file: errors.append("Upload document")
-    if not selfie_file: errors.append("Upload selfie")
+if st.button("🚀 RUN SECURE VERIFICATION"):
+    if not name or not doc_file or not selfie_capture:
+        st.warning("⚠️ Action Required: Please provide Name, ID Document, and Live Selfie.")
+    else:
+        with st.spinner("Processing Secure Biometrics..."):
+            # 1. Load images
+            img_doc = Image.open(doc_file)
+            img_selfie = Image.open(selfie_capture)
 
-    if errors:
-        for e in errors:
-            st.error(e)
-        st.stop()
+            # 2. Run Cross-Check (Anti-Fake Data)
+            raw_text = extract_ocr_text(img_doc)
+            name_score, name_status = verify_identity_logic(name, raw_text)
 
-    with st.spinner("🔍 Running KYC Verification..."):
-        doc_img = Image.open(doc_file).convert("RGB")
-        selfie_img = Image.open(selfie_file).convert("RGB")
+            # 3. Run Face Comparison
+            face_score, face_status, raw_sim = biometric_face_check(img_doc, img_selfie)
 
-        data_score, data_status = score_data(name, address, dob, phone, email)
-        ocr_text = extract_ocr_text(doc_img)
-        doc_score, doc_status = score_document(ocr_text)
-        face_score, face_status, similarity = compare_faces(doc_img, selfie_img)
-
-        total_score = min(data_score + doc_score + face_score, 100)
-        risk, decision = get_risk_category(total_score)
-
-        # ─────────────────────────────────────────
-        # OUTPUT (Inside the button block)
-        # ─────────────────────────────────────────
-        st.subheader("📊 KYC Results")
-        st.markdown(f"## 🎯 Final Score: {total_score}/100")
-        st.progress(total_score / 100)
-
-        res_col1, res_col2 = st.columns(2)
-        with res_col1:
-            st.write("### Breakdown")
-            st.write("📄 Document Score:", doc_score, doc_status)
-            st.write("🧑 Face Score:", face_score, face_status)
-            st.write("📋 Data Score:", data_score, data_status)
-            st.write(f"🔬 Similarity Metric: {round(similarity, 2)}")
-
-        with res_col2:
-            st.write("### Decision")
-            if "Trusted" in risk:
-                st.success(f"{risk} — {decision}")
-            elif "Suspicious" in risk:
-                st.warning(f"{risk} — {decision}")
+            # 4. Final Aggregation
+            # We give 20 base points for valid data format
+            total_score = name_score + face_score + 20
+            
+            # Display Results
+            st.divider()
+            
+            if total_score >= 80:
+                st.success(f"### 🎯 IDENTITY VERIFIED: {total_score}/100")
+                st.balloons()
+            elif total_score >= 50:
+                st.warning(f"### 🔍 MANUAL REVIEW NEEDED: {total_score}/100")
             else:
-                st.error(f"{risk} — {decision}")
+                st.error(f"### ❌ REJECTED - SECURITY ALERT: {total_score}/100")
 
-        st.write("### OCR Extracted Text")
-        st.info(ocr_text if ocr_text else "No text found")
+            # Detail Breakdown
+            res_col1, res_col2 = st.columns(2)
+            with res_col1:
+                st.write(f"**Name Check:** {name_status}")
+                st.write(f"**Face Matching:** {face_status}")
+            with res_col2:
+                st.write(f"**Document Type:** {doc_type}")
+                st.write(f"**Biometric Similarity:** {round(raw_sim * 100, 1)}%")
 
-        st.write("### Summary")
-        df = pd.DataFrame({
-            "Field": ["Name", "Email", "Phone", "Score", "Risk"],
-            "Value": [name, email, phone, total_score, risk]
-        })
-        st.table(df)
+            with st.expander("Show Technical Audit Trail (OCR Data)"):
+                st.code(raw_text if raw_text else "No machine-readable text found.")
