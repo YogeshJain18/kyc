@@ -1,8 +1,2 @@
-streamlit
-opencv-python-headless
-pytesseract
-pillow
-numpy
-pandas
-fuzzywuzzy
-python-Levenshtein
+tesseract-ocr
+libgl1-mesa-glx
