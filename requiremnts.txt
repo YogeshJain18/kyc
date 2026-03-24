@@ -4,3 +4,5 @@ pytesseract
 pillow
 numpy
 pandas
+fuzzywuzzy
+python-Levenshtein
