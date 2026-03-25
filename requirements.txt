@@ -1,7 +1,9 @@
 streamlit
-opencv-python-headless
-pytesseract
-pillow
+pandas
 numpy
-fuzzywuzzy
-python-Levenshtein
+opencv-python-headless
+face_recognition
+Pillow
+streamlit-webrtc
+av
+plotly
